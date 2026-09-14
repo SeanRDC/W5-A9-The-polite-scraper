@@ -5,6 +5,19 @@ from urllib.parse import urljoin
 import time
 from datetime import datetime, timezone
 import json
+from pydantic import BaseModel, ValidationError
+from typing import Optional
+
+class BookRecord(BaseModel):
+    title: str
+    price_text: str
+    price_gbp: float
+    description: Optional[str]
+    availability_text: str
+    rating_text: str
+    product_url: str
+    source_page: str
+    fetched_at: str
 
 def fetch_html(url, cache_path):
     if os.path.exists(cache_path):
@@ -106,3 +119,29 @@ for book, url in enumerate(discovered):
 
 print(json.dumps(raw_records[0], indent=2))
 print(f"detail_pages = {len(raw_records)}")
+
+
+for record in raw_records:
+    price_val = record["price_text"]
+    record["price_gbp"] = float(price_val.replace("£", "").replace("Â", ""))
+
+valid_records = []
+errors = []
+
+for record in raw_records:
+    try:
+        clean_book = BookRecord(**record)
+        clean_dict = clean_book.model_dump()
+        valid_records.append(clean_dict)
+    except ValidationError as e:
+        errors.append({"original_data": record, "error_message": str(e)})
+        
+os.makedirs("output", exist_ok=True)
+
+with open("output/books.json", "w", encoding="utf-8") as file:
+    json.dump(valid_records, file, indent=4)
+
+with open("output/errors.json", "w", encoding="utf-8") as file:
+    json.dump(errors, file, indent=4)
+    
+print(f"valid_records = {len(valid_records)}")
