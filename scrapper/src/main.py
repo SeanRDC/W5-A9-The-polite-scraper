@@ -3,6 +3,8 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import time
+from datetime import datetime, timezone
+import json
 
 def fetch_html(url, cache_path):
     if os.path.exists(cache_path):
@@ -59,3 +61,48 @@ while pages_visited < 3 and current_url is not None:
     
 discovered = list(set(discovered_urls))
 print(f"catalogue_pages = {pages_visited}, discovered = {len(discovered_urls)}, unique_urls = {len(discovered)}")
+
+raw_records = []
+
+for book, url in enumerate(discovered):
+    dynamic_cache_path = f"cache/book-{book}.html"
+    html, was_live_requests = fetch_html(url, dynamic_cache_path)
+    
+    if was_live_requests:
+        time.sleep(0.5)
+        
+    soup = BeautifulSoup(html, "html.parser")
+    
+    product_area = soup.find("article", class_="product_page")
+    title = product_area.find("h1").text
+    price = product_area.find("p", class_="price_color").text
+    availability = product_area.find("p", class_="instock availability").text.strip()
+
+    p_element = product_area.find("p",class_="star-rating")
+    rating = p_element['class'][1]
+
+    id_attribute = product_area.find(id = "product_description")
+    if id_attribute:
+        description = id_attribute.find_next("p").text
+    else:
+        description = None
+        
+    source_page = "https://books.toscrape.com/catalogue/page-1.html"
+    
+    fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    
+    build_dict = {
+    "title": title,
+    "product_url": url,
+    "price_text": price,
+    "availability_text": availability,
+    "rating_text": rating,
+    "description": description,
+    "source_page": source_page,
+    "fetched_at": fetched_at
+    }
+
+    raw_records.append(build_dict)
+
+print(json.dumps(raw_records[0], indent=2))
+print(f"detail_pages = {len(raw_records)}")
