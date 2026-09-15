@@ -8,11 +8,13 @@ import json
 from pydantic import BaseModel, ValidationError
 from typing import Optional
 
+# Initialize run metrics and start the execution timer
 start_time = time.time()
 pages_fetched = 0
 cache_hits = 0
 failed_pages = 0
 
+# Define the strict Pydantic schema to validate the shape of our final data
 class BookRecord(BaseModel):
     title: str
     price_text: str
@@ -24,6 +26,7 @@ class BookRecord(BaseModel):
     source_page: str
     fetched_at: str
 
+# Fetch HTML with intelligent retry logic, status code checks, and local caching
 def fetch_html(url, cache_path):
     if os.path.exists(cache_path):
         with open(cache_path, 'r', encoding='utf-8') as file:
@@ -62,6 +65,7 @@ current_url = "https://books.toscrape.com/catalogue/page-1.html"
 pages_visited = 0
 discovered_urls = []
 
+# Discover all book links across the first 3 catalogue pages
 while pages_visited < 3 and current_url is not None:
     dynamic_cache_path = f"cache/catalogue-page-{pages_visited + 1}.html"
     
@@ -89,12 +93,17 @@ while pages_visited < 3 and current_url is not None:
         current_url = None
         
     pages_visited += 1 
+
+# Deduplicate discovered URLs to ensure we only scrape each book once
 discovered = list(set(discovered_urls))
 print(f"catalogue_pages = {pages_visited}, discovered = {len(discovered_urls)}, unique_urls = {len(discovered)}")
 
 raw_records = []
 
+# for testing stage 5 failure
 discovered.append("https://books.toscrape.com/catalogue/this-page-does-not-exist.html")
+
+# Iterate through all discovered books to safely extract detailed DOM information
 for book, url in enumerate(discovered):
     try:
         dynamic_cache_path = f"cache/book-{book}.html"
@@ -126,6 +135,7 @@ for book, url in enumerate(discovered):
         
         fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         
+        # Build the raw dictionary record from the extracted DOM elements
         build_dict = {
         "title": title,
         "product_url": url,
@@ -139,6 +149,7 @@ for book, url in enumerate(discovered):
 
         raw_records.append(build_dict)
         
+    # Catch and log any extraction errors to protect the pipeline from crashing
     except Exception as e:
         print(f"Failed to proccess {url}, error: {str(e)}")
         failed_pages += 1
@@ -148,6 +159,7 @@ print(json.dumps(raw_records[0], indent=2))
 print(f"detail_pages = {len(raw_records)}")
 
 
+# Normalize the raw price string into a clean, computable float
 for record in raw_records:
     price_val = record["price_text"]
     record["price_gbp"] = float(price_val.replace("£", "").replace("Â", ""))
@@ -155,6 +167,7 @@ for record in raw_records:
 valid_records = []
 errors = []
 
+# Validate each record against the Pydantic schema and quarantine any failures
 for record in raw_records:
     try:
         clean_book = BookRecord(**record)
@@ -165,6 +178,7 @@ for record in raw_records:
         
 os.makedirs("output", exist_ok=True)
 
+# Serialize the validated records and errors to the local disk as JSON
 with open("output/books.json", "w", encoding="utf-8") as file:
     json.dump(valid_records, file, indent=4)
 
@@ -173,6 +187,7 @@ with open("output/errors.json", "w", encoding="utf-8") as file:
     
 print(f"valid_records = {len(valid_records)}")
 
+# Calculate the final execution duration and generate the run report
 current_time = time.time()
 total_duration = round(current_time - start_time, 2)
 
