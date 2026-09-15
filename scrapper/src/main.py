@@ -8,6 +8,11 @@ import json
 from pydantic import BaseModel, ValidationError
 from typing import Optional
 
+start_time = time.time()
+pages_fetched = 0
+cache_hits = 0
+failed_pages = 0
+
 class BookRecord(BaseModel):
     title: str
     price_text: str
@@ -28,17 +33,30 @@ def fetch_html(url, cache_path):
     else:
         try:
             headers = {"User-Agent": "FlyRankInternship-A9/1.0 (https://github.com/SeanRDC/W5-A9-The-polite-scraper)"}
-            response = requests.get(url, headers=headers, timeout=5)
-            
-            if response.status_code == 200:
-                raw_text = response.text
-                with open(cache_path, 'w', encoding='utf-8') as file:
-                    file.write(raw_text)
-                print("FETCH")
-                html_content = raw_text
-                return html_content, True
+            for attemp in range(2):
+                try:
+                    response = requests.get(url, headers=headers, timeout=5)
+                    
+                    if response.status_code == 200:
+                        raw_text = response.text
+                        with open(cache_path, 'w', encoding='utf-8') as file:
+                            file.write(raw_text)
+                        print("FETCH")
+                        html_content = raw_text
+                        return response.text, True
+                    elif response.status_code in [403, 404]:
+                        print(f"Permanent error {response.status_code} for {url}. Stopping.")
+                        break
+                    elif response.status_code >= 500:
+                        print(f"Server error {response.status_code}. Retrying...")
+                        time.sleep(2)
+                except requests.exceptions.RequestException as e:
+                    print(f"Network error: {e}. Retrying...")
+                    time.sleep(2)
+            return None, True
         except Exception as e:
             print({"message": f"{str(e)}"})
+            
     
 current_url = "https://books.toscrape.com/catalogue/page-1.html"
 pages_visited = 0
@@ -70,52 +88,61 @@ while pages_visited < 3 and current_url is not None:
     else:
         current_url = None
         
-    pages_visited += 1
-    
+    pages_visited += 1 
 discovered = list(set(discovered_urls))
 print(f"catalogue_pages = {pages_visited}, discovered = {len(discovered_urls)}, unique_urls = {len(discovered)}")
 
 raw_records = []
 
+discovered.append("https://books.toscrape.com/catalogue/this-page-does-not-exist.html")
 for book, url in enumerate(discovered):
-    dynamic_cache_path = f"cache/book-{book}.html"
-    html, was_live_requests = fetch_html(url, dynamic_cache_path)
-    
-    if was_live_requests:
-        time.sleep(0.5)
+    try:
+        dynamic_cache_path = f"cache/book-{book}.html"
+        html, was_live_requests = fetch_html(url, dynamic_cache_path)
         
-    soup = BeautifulSoup(html, "html.parser")
-    
-    product_area = soup.find("article", class_="product_page")
-    title = product_area.find("h1").text
-    price = product_area.find("p", class_="price_color").text
-    availability = product_area.find("p", class_="instock availability").text.strip()
-
-    p_element = product_area.find("p",class_="star-rating")
-    rating = p_element['class'][1]
-
-    id_attribute = product_area.find(id = "product_description")
-    if id_attribute:
-        description = id_attribute.find_next("p").text
-    else:
-        description = None
+        if was_live_requests:
+            time.sleep(0.5)
+            pages_fetched += 1
+        else:
+            cache_hits += 1
+            
+        soup = BeautifulSoup(html, "html.parser")
         
-    source_page = "https://books.toscrape.com/catalogue/page-1.html"
-    
-    fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    
-    build_dict = {
-    "title": title,
-    "product_url": url,
-    "price_text": price,
-    "availability_text": availability,
-    "rating_text": rating,
-    "description": description,
-    "source_page": source_page,
-    "fetched_at": fetched_at
-    }
+        product_area = soup.find("article", class_="product_page")
+        title = product_area.find("h1").text
+        price = product_area.find("p", class_="price_color").text
+        availability = product_area.find("p", class_="instock availability").text.strip()
 
-    raw_records.append(build_dict)
+        p_element = product_area.find("p",class_="star-rating")
+        rating = p_element['class'][1]
+
+        id_attribute = product_area.find(id = "product_description")
+        if id_attribute:
+            description = id_attribute.find_next("p").text
+        else:
+            description = None
+            
+        source_page = "https://books.toscrape.com/catalogue/page-1.html"
+        
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        
+        build_dict = {
+        "title": title,
+        "product_url": url,
+        "price_text": price,
+        "availability_text": availability,
+        "rating_text": rating,
+        "description": description,
+        "source_page": source_page,
+        "fetched_at": fetched_at
+        }
+
+        raw_records.append(build_dict)
+        
+    except Exception as e:
+        print(f"Failed to proccess {url}, error: {str(e)}")
+        failed_pages += 1
+        continue
 
 print(json.dumps(raw_records[0], indent=2))
 print(f"detail_pages = {len(raw_records)}")
@@ -145,3 +172,18 @@ with open("output/errors.json", "w", encoding="utf-8") as file:
     json.dump(errors, file, indent=4)
     
 print(f"valid_records = {len(valid_records)}")
+
+current_time = time.time()
+total_duration = round(current_time - start_time, 2)
+
+report_dict = {
+    "Duration": f"{total_duration}s",
+    "Pages fetched": pages_fetched,
+    "Cache hits": cache_hits,
+    "Valid records": len(valid_records),
+    "Invalid records": len(errors),
+    "Failed pages": failed_pages
+}
+
+with open("output/run-report.json", "w", encoding="utf-8") as file:
+    json.dump(report_dict, file, indent=4)
