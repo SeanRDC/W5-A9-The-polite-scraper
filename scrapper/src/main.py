@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import json
 from pydantic import BaseModel, ValidationError
 from typing import Optional
+import csv
 
 # Initialize run metrics and start the execution timer
 start_time = time.time()
@@ -202,3 +203,12 @@ report_dict = {
 
 with open("output/run-report.json", "w", encoding="utf-8") as file:
     json.dump(report_dict, file, indent=4)
+    
+# CSV file export
+CSVHeaders = valid_records[0].keys()
+
+with open("output/books.csv", "w", newline="", encoding="utf-8") as file:
+    writer = csv.DictWriter(file, fieldnames=CSVHeaders)
+    
+    writer.writeheader()
+    writer.writerows(valid_records)
